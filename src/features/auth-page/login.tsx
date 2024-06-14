@@ -30,9 +30,6 @@ export const LogIn: FC<LoginProps> = (props) => {
           </Avatar>
           <span className="text-primary">{AI_NAME}</span>
         </CardTitle>
-        <CardDescription>
-          登录到您的 GitHub 或 Microsoft 365 账户
-        </CardDescription>
       </CardHeader>
     </Card>
   );
