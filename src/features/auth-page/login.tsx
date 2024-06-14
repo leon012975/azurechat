@@ -29,10 +29,6 @@ export const LogIn: FC<LoginProps> = (props) => {
     return <div>Loading...</div>;
   }
 
-  if (status === 'authenticated') {
-    return <div>Welcome, {AI_NAME}!</div>;
-  }
-
   // 如果用户未认证，不显示任何内容
   return null;
 };
