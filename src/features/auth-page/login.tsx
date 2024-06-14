@@ -4,6 +4,7 @@ import { signIn } from "next-auth/react";
 import { FC } from "react";
 import { Avatar, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
+import { useEffect } from 'react';
 import {
   Card,
   CardContent,
