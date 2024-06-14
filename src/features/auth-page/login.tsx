@@ -1,7 +1,10 @@
 "use client";
-import { FC, useEffect } from "react";
+import { AI_NAME } from "@/features/theme/theme-config";
 import { signIn } from "next-auth/react";
+import { FC } from "react";
 import { Avatar, AvatarImage } from "../ui/avatar";
+import { Button } from "../ui/button";
+import { useEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -9,15 +12,15 @@ import {
   CardHeader,
   CardTitle,
 } from "../ui/card";
-import { AI_NAME } from "@/features/theme/theme-config";
-
-interface LoginProps {}
-
-export const LogIn: FC<LoginProps> = () => {
+interface LoginProps {
+  isDevMode: boolean;
+}
+export const LogIn: FC<LoginProps> = (props) => {
   useEffect(() => {
-    signIn("azure-ad");
-  }, []);
-
+    signIn("azure-ad")
+    return () => { 
+    };
+  });
   return (
     <Card className="flex gap-2 flex-col min-w-[300px]">
       <CardHeader className="gap-2">
@@ -28,12 +31,9 @@ export const LogIn: FC<LoginProps> = () => {
           <span className="text-primary">{AI_NAME}</span>
         </CardTitle>
         <CardDescription>
-          Redirecting to Microsoft 365 login...
+          登录到您的 GitHub 或 Microsoft 365 账户
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-4">
-        {/* This section is intentionally left empty as we are redirecting */}
-      </CardContent>
     </Card>
   );
 };
