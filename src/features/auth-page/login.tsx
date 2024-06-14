@@ -1,7 +1,6 @@
 "use client";
-import { AI_NAME } from "@/features/theme/theme-config";
-import { signIn } from "next-auth/react";
 import { FC, useEffect } from "react";
+import { signIn } from "next-auth/react";
 import { Avatar, AvatarImage } from "../ui/avatar";
 import {
   Card,
@@ -10,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../ui/card";
+import { AI_NAME } from "@/features/theme/theme-config";
 
 interface LoginProps {}
 
@@ -32,6 +32,7 @@ export const LogIn: FC<LoginProps> = () => {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
+        {/* This section is intentionally left empty as we are redirecting */}
       </CardContent>
     </Card>
   );
