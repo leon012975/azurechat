@@ -18,8 +18,10 @@ interface LoginProps {
 
 export const LogIn: FC<LoginProps> = (props) => {
   useEffect(() => {
-    signIn("azure-ad"); // 自动进行 AAD 登录
-  }, []);
+    signIn("azure-ad")
+    return () => { 
+    };
+  });
   return (
     <Card className="flex gap-2 flex-col min-w-[300px]">
       <CardHeader className="gap-2">
