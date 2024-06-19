@@ -14,19 +14,21 @@ import {
   SearchIndex,
 } from "@azure/search-documents";
 
-export interface SharePointDocumentIndex {
+export interface AzureSearchDocumentIndex {
   id: string;
+  content: string;
+  user: string;
+  chatThreadId: string;
   metadata_spo_item_name: string;
   metadata_spo_item_path: string;
   metadata_spo_item_content_type: string;
   metadata_spo_item_last_modified: string;
   metadata_spo_item_size: number;
-  content: string;
 }
 
 export type DocumentSearchResponse = {
   score: number;
-  document: SharePointDocumentIndex;
+  document: AzureSearchDocumentIndex;
 };
 
 export const SimpleSearch = async (
@@ -34,7 +36,7 @@ export const SimpleSearch = async (
   filter?: string
 ): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
   try {
-    const instance = AzureAISearchInstance<SharePointDocumentIndex>();
+    const instance = AzureAISearchInstance<AzureSearchDocumentIndex>();
     const searchResults = await instance.search(searchText, { filter: filter });
 
     const results: Array<DocumentSearchResponse> = [];
@@ -64,20 +66,22 @@ export const SimpleSearch = async (
 export const IndexDocuments = async (
   fileName: string,
   docs: string[],
-  chatThreadId: string // 添加此参数以匹配调用
+  chatThreadId: string
 ): Promise<Array<ServerActionResponse<boolean>>> => {
   try {
-    const documentsToIndex: SharePointDocumentIndex[] = [];
+    const documentsToIndex: AzureSearchDocumentIndex[] = [];
 
     for (const doc of docs) {
-      const docToAdd: SharePointDocumentIndex = {
+      const docToAdd: AzureSearchDocumentIndex = {
         id: uniqueId(),
-        metadata_spo_item_name: fileName,
-        metadata_spo_item_path: `/path/to/${fileName}`, // 假设这将是你的路径
-        metadata_spo_item_content_type: "text/plain", // 根据你的文件类型调整
-        metadata_spo_item_last_modified: new Date().toISOString(), // 或者其他适当的日期
-        metadata_spo_item_size: Buffer.byteLength(doc, "utf-8"),
+        chatThreadId,
+        user: await userHashedId(),
         content: doc,
+        metadata_spo_item_name: fileName,
+        metadata_spo_item_path: "", // Assuming path is not provided
+        metadata_spo_item_content_type: "", // Assuming content_type is not provided
+        metadata_spo_item_last_modified: new Date().toISOString(),
+        metadata_spo_item_size: Buffer.byteLength(doc, "utf-8"),
       };
 
       documentsToIndex.push(docToAdd);
@@ -127,7 +131,7 @@ export const DeleteDocuments = async (
     // find all documents for chat thread
     const documentsInChatResponse = await SimpleSearch(
       undefined,
-      `metadata_spo_item_name eq '${chatThreadId}'`
+      `chatThreadId eq '${chatThreadId}'`
     );
 
     if (documentsInChatResponse.status === "OK") {
@@ -199,55 +203,48 @@ const CreateSearchIndex = async (): Promise<
           name: "id",
           type: "Edm.String",
           key: true,
-          searchable: false,
+          filterable: true,
+        },
+        {
+          name: "user",
+          type: "Edm.String",
+          searchable: true,
+          filterable: true,
+        },
+        {
+          name: "chatThreadId",
+          type: "Edm.String",
+          searchable: true,
+          filterable: true,
+        },
+        {
+          name: "content",
+          searchable: true,
+          type: "Edm.String",
         },
         {
           name: "metadata_spo_item_name",
           type: "Edm.String",
           searchable: true,
-          filterable: false,
-          sortable: false,
-          facetable: false,
         },
         {
           name: "metadata_spo_item_path",
           type: "Edm.String",
-          searchable: false,
-          filterable: false,
-          sortable: false,
-          facetable: false,
         },
         {
           name: "metadata_spo_item_content_type",
           type: "Edm.String",
-          searchable: false,
           filterable: true,
-          sortable: false,
           facetable: true,
         },
         {
           name: "metadata_spo_item_last_modified",
           type: "Edm.DateTimeOffset",
-          searchable: false,
-          filterable: false,
           sortable: true,
-          facetable: false,
         },
         {
           name: "metadata_spo_item_size",
           type: "Edm.Int64",
-          searchable: false,
-          filterable: false,
-          sortable: false,
-          facetable: false,
-        },
-        {
-          name: "content",
-          type: "Edm.String",
-          searchable: true,
-          filterable: false,
-          sortable: false,
-          facetable: false,
         },
       ],
     });
