@@ -63,7 +63,8 @@ export const SimpleSearch = async (
 
 export const IndexDocuments = async (
   fileName: string,
-  docs: string[]
+  docs: string[],
+  chatThreadId: string // 添加此参数以匹配调用
 ): Promise<Array<ServerActionResponse<boolean>>> => {
   try {
     const documentsToIndex: SharePointDocumentIndex[] = [];
