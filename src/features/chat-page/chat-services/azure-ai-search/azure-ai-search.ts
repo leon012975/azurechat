@@ -7,7 +7,6 @@ import {
   AzureAISearchIndexClientInstance,
   AzureAISearchInstance,
 } from "@/features/common/services/ai-search";
-import { OpenAIEmbeddingInstance } from "@/features/common/services/openai";
 import { uniqueId } from "@/features/common/util";
 import {
   AzureKeyCredential,
@@ -15,18 +14,19 @@ import {
   SearchIndex,
 } from "@azure/search-documents";
 
-export interface AzureSearchDocumentIndex {
+export interface SharePointDocumentIndex {
   id: string;
-  pageContent: string;
-  embedding?: number[];
-  user: string;
-  chatThreadId: string;
-  metadata: string;
+  metadata_spo_item_name: string;
+  metadata_spo_item_path: string;
+  metadata_spo_item_content_type: string;
+  metadata_spo_item_last_modified: string;
+  metadata_spo_item_size: number;
+  content: string;
 }
 
 export type DocumentSearchResponse = {
   score: number;
-  document: AzureSearchDocumentIndex;
+  document: SharePointDocumentIndex;
 };
 
 export const SimpleSearch = async (
@@ -34,7 +34,7 @@ export const SimpleSearch = async (
   filter?: string
 ): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
   try {
-    const instance = AzureAISearchInstance<AzureSearchDocumentIndex>();
+    const instance = AzureAISearchInstance<SharePointDocumentIndex>();
     const searchResults = await instance.search(searchText, { filter: filter });
 
     const results: Array<DocumentSearchResponse> = [];
@@ -61,194 +61,50 @@ export const SimpleSearch = async (
   }
 };
 
-export const SimilaritySearch = async (
-  searchText: string,
-  k: number,
-  filter?: string
-): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
-  try {
-    const openai = OpenAIEmbeddingInstance();
-    const embeddings = await openai.embeddings.create({
-      input: searchText,
-      model: "",
-    });
-
-    const searchClient = AzureAISearchInstance<AzureSearchDocumentIndex>();
-
-    const searchResults = await searchClient.search(searchText, {
-      top: k,
-      filter: filter,
-      vectorSearchOptions: {
-        queries: [
-          {
-            vector: embeddings.data[0].embedding,
-            fields: ["embedding"],
-            kind: "vector",
-            kNearestNeighborsCount: 10,
-          },
-        ],
-      },
-    });
-
-    const results: Array<DocumentSearchResponse> = [];
-    for await (const result of searchResults.results) {
-      results.push({
-        score: result.score,
-        document: result.document,
-      });
-    }
-
-    return {
-      status: "OK",
-      response: results,
-    };
-  } catch (e) {
-    return {
-      status: "ERROR",
-      errors: [
-        {
-          message: `${e}`,
-        },
-      ],
-    };
-  }
-};
-
-export const ExtensionSimilaritySearch = async (props: {
-  searchText: string;
-  vectors: string[];
-  apiKey: string;
-  searchName: string;
-  indexName: string;
-}): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
-  try {
-    const openai = OpenAIEmbeddingInstance();
-    const { searchText, vectors, apiKey, searchName, indexName } = props;
-
-    const embeddings = await openai.embeddings.create({
-      input: searchText,
-      model: "",
-    });
-
-    const endpoint = `https://${searchName}.search.windows.net`;
-
-    const searchClient = new SearchClient(
-      endpoint,
-      indexName,
-      new AzureKeyCredential(apiKey)
-    );
-
-    const searchResults = await searchClient.search(searchText, {
-      top: 3,
-
-      // filter: filter,
-      vectorSearchOptions: {
-        queries: [
-          {
-            vector: embeddings.data[0].embedding,
-            fields: vectors,
-            kind: "vector",
-            kNearestNeighborsCount: 10,
-          },
-        ],
-      },
-    });
-
-    const results: Array<any> = [];
-    for await (const result of searchResults.results) {
-      const item = {
-        score: result.score,
-        document: result.document,
-      };
-
-      // exclude the all the fields that are not in the fields array
-      const document = item.document as any;
-      const newDocument: any = {};
-
-      // iterate over the object entries in document
-      // and only include the fields that are in the fields array
-
-      for (const key in document) {
-        const hasKey = vectors.includes(key);
-        if (!hasKey) {
-          newDocument[key] = document[key];
-        }
-      }
-
-      results.push({
-        score: result.score,
-        document: newDocument, // Use the newDocument object instead of the original document
-      });
-    }
-
-    return {
-      status: "OK",
-      response: results,
-    };
-  } catch (e) {
-    return {
-      status: "ERROR",
-      errors: [
-        {
-          message: `${e}`,
-        },
-      ],
-    };
-  }
-};
-
 export const IndexDocuments = async (
   fileName: string,
-  docs: string[],
-  chatThreadId: string
+  docs: string[]
 ): Promise<Array<ServerActionResponse<boolean>>> => {
   try {
-    const documentsToIndex: AzureSearchDocumentIndex[] = [];
+    const documentsToIndex: SharePointDocumentIndex[] = [];
 
     for (const doc of docs) {
-      const docToAdd: AzureSearchDocumentIndex = {
+      const docToAdd: SharePointDocumentIndex = {
         id: uniqueId(),
-        chatThreadId,
-        user: await userHashedId(),
-        pageContent: doc,
-        metadata: fileName,
-        embedding: [],
+        metadata_spo_item_name: fileName,
+        metadata_spo_item_path: `/path/to/${fileName}`, // 假设这将是你的路径
+        metadata_spo_item_content_type: "text/plain", // 根据你的文件类型调整
+        metadata_spo_item_last_modified: new Date().toISOString(), // 或者其他适当的日期
+        metadata_spo_item_size: Buffer.byteLength(doc, "utf-8"),
+        content: doc,
       };
 
       documentsToIndex.push(docToAdd);
     }
 
     const instance = AzureAISearchInstance();
-    const embeddingsResponse = await EmbedDocuments(documentsToIndex);
+    const uploadResponse = await instance.uploadDocuments(documentsToIndex);
 
-    if (embeddingsResponse.status === "OK") {
-      const uploadResponse = await instance.uploadDocuments(
-        embeddingsResponse.response
-      );
+    const response: Array<ServerActionResponse<boolean>> = [];
+    uploadResponse.results.forEach((r) => {
+      if (r.succeeded) {
+        response.push({
+          status: "OK",
+          response: r.succeeded,
+        });
+      } else {
+        response.push({
+          status: "ERROR",
+          errors: [
+            {
+              message: `${r.errorMessage}`,
+            },
+          ],
+        });
+      }
+    });
 
-      const response: Array<ServerActionResponse<boolean>> = [];
-      uploadResponse.results.forEach((r) => {
-        if (r.succeeded) {
-          response.push({
-            status: "OK",
-            response: r.succeeded,
-          });
-        } else {
-          response.push({
-            status: "ERROR",
-            errors: [
-              {
-                message: `${r.errorMessage}`,
-              },
-            ],
-          });
-        }
-      });
-
-      return response;
-    }
-
-    return [embeddingsResponse];
+    return response;
   } catch (e) {
     return [
       {
@@ -270,7 +126,7 @@ export const DeleteDocuments = async (
     // find all documents for chat thread
     const documentsInChatResponse = await SimpleSearch(
       undefined,
-      `chatThreadId eq '${chatThreadId}'`
+      `metadata_spo_item_name eq '${chatThreadId}'`
     );
 
     if (documentsInChatResponse.status === "OK") {
@@ -315,39 +171,6 @@ export const DeleteDocuments = async (
   }
 };
 
-export const EmbedDocuments = async (
-  documents: Array<AzureSearchDocumentIndex>
-): Promise<ServerActionResponse<Array<AzureSearchDocumentIndex>>> => {
-  try {
-    const openai = OpenAIEmbeddingInstance();
-
-    const contentsToEmbed = documents.map((d) => d.pageContent);
-
-    const embeddings = await openai.embeddings.create({
-      input: contentsToEmbed,
-      model: process.env.AZURE_OPENAI_API_EMBEDDINGS_DEPLOYMENT_NAME,
-    });
-
-    embeddings.data.forEach((embedding, index) => {
-      documents[index].embedding = embedding.embedding;
-    });
-
-    return {
-      status: "OK",
-      response: documents,
-    };
-  } catch (e) {
-    return {
-      status: "ERROR",
-      errors: [
-        {
-          message: `${e}`,
-        },
-      ],
-    };
-  }
-};
-
 export const EnsureIndexIsCreated = async (): Promise<
   ServerActionResponse<SearchIndex>
 > => {
@@ -355,6 +178,9 @@ export const EnsureIndexIsCreated = async (): Promise<
     const client = AzureAISearchIndexClientInstance();
     const result = await client.getIndex(process.env.AZURE_SEARCH_INDEX_NAME);
     return {
+      status: "OK",
+      response: result,
+  return {
       status: "OK",
       response: result,
     };
@@ -370,64 +196,60 @@ const CreateSearchIndex = async (): Promise<
     const client = AzureAISearchIndexClientInstance();
     const result = await client.createIndex({
       name: process.env.AZURE_SEARCH_INDEX_NAME,
-      vectorSearch: {
-        algorithms: [
-          {
-            name: "hnsw-vector",
-            kind: "hnsw",
-            parameters: {
-              m: 4,
-              efConstruction: 200,
-              efSearch: 200,
-              metric: "cosine",
-            },
-          },
-        ],
-        profiles: [
-          {
-            name: "hnsw-vector",
-            algorithmConfigurationName: "hnsw-vector",
-          },
-        ],
-      },
-
       fields: [
         {
           name: "id",
           type: "Edm.String",
           key: true,
-          filterable: true,
+          searchable: false,
         },
         {
-          name: "user",
+          name: "metadata_spo_item_name",
           type: "Edm.String",
-          searchable: true,
-          filterable: true,
-        },
-        {
-          name: "chatThreadId",
-          type: "Edm.String",
-          searchable: true,
-          filterable: true,
-        },
-        {
-          name: "pageContent",
-          searchable: true,
-          type: "Edm.String",
-        },
-        {
-          name: "metadata",
-          type: "Edm.String",
-        },
-        {
-          name: "embedding",
-          type: "Collection(Edm.Single)",
           searchable: true,
           filterable: false,
           sortable: false,
           facetable: false,
-          vectorSearchDimensions: 1536,
-          vectorSearchProfileName: "hnsw-vector",
+        },
+        {
+          name: "metadata_spo_item_path",
+          type: "Edm.String",
+          searchable: false,
+          filterable: false,
+          sortable: false,
+          facetable: false,
+        },
+        {
+          name: "metadata_spo_item_content_type",
+          type: "Edm.String",
+          searchable: false,
+          filterable: true,
+          sortable: false,
+          facetable: true,
+        },
+        {
+          name: "metadata_spo_item_last_modified",
+          type: "Edm.DateTimeOffset",
+          searchable: false,
+          filterable: false,
+          sortable: true,
+          facetable: false,
+        },
+        {
+          name: "metadata_spo_item_size",
+          type: "Edm.Int64",
+          searchable: false,
+          filterable: false,
+          sortable: false,
+          facetable: false,
+        },
+        {
+          name: "content",
+          type: "Edm.String",
+          searchable: true,
+          filterable: false,
+          sortable: false,
+          facetable: false,
         },
       ],
     });
@@ -446,4 +268,4 @@ const CreateSearchIndex = async (): Promise<
       ],
     };
   }
-};
+};    
