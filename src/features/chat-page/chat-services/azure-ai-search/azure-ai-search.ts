@@ -7,6 +7,7 @@ import {
   AzureAISearchIndexClientInstance,
   AzureAISearchInstance,
 } from "@/features/common/services/ai-search";
+import { OpenAIEmbeddingInstance } from "@/features/common/services/openai";
 import { uniqueId } from "@/features/common/util";
 import {
   AzureKeyCredential,
@@ -16,14 +17,11 @@ import {
 
 export interface AzureSearchDocumentIndex {
   id: string;
-  content: string;
+  pageContent: string;
+  embedding?: number[];
   user: string;
   chatThreadId: string;
-  metadata_spo_item_name: string;
-  metadata_spo_item_path: string;
-  metadata_spo_item_content_type: string;
-  metadata_spo_item_last_modified: string;
-  metadata_spo_item_size: number;
+  metadata: string;
 }
 
 export type DocumentSearchResponse = {
@@ -63,6 +61,142 @@ export const SimpleSearch = async (
   }
 };
 
+export const SimilaritySearch = async (
+  searchText: string,
+  k: number,
+  filter?: string
+): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
+  try {
+    const openai = OpenAIEmbeddingInstance();
+    const embeddings = await openai.embeddings.create({
+      input: searchText,
+      model: "",
+    });
+
+    const searchClient = AzureAISearchInstance<AzureSearchDocumentIndex>();
+
+    const searchResults = await searchClient.search(searchText, {
+      top: k,
+      filter: filter,
+      vectorSearchOptions: {
+        queries: [
+          {
+            vector: embeddings.data[0].embedding,
+            fields: ["embedding"],
+            kind: "vector",
+            kNearestNeighborsCount: 10,
+          },
+        ],
+      },
+    });
+
+    const results: Array<DocumentSearchResponse> = [];
+    for await (const result of searchResults.results) {
+      results.push({
+        score: result.score,
+        document: result.document,
+      });
+    }
+
+    return {
+      status: "OK",
+      response: results,
+    };
+  } catch (e) {
+    return {
+      status: "ERROR",
+      errors: [
+        {
+          message: `${e}`,
+        },
+      ],
+    };
+  }
+};
+
+export const ExtensionSimilaritySearch = async (props: {
+  searchText: string;
+  vectors: string[];
+  apiKey: string;
+  searchName: string;
+  indexName: string;
+}): Promise<ServerActionResponse<Array<DocumentSearchResponse>>> => {
+  try {
+    const openai = OpenAIEmbeddingInstance();
+    const { searchText, vectors, apiKey, searchName, indexName } = props;
+
+    const embeddings = await openai.embeddings.create({
+      input: searchText,
+      model: "",
+    });
+
+    const endpoint = `https://${searchName}.search.windows.net`;
+
+    const searchClient = new SearchClient(
+      endpoint,
+      indexName,
+      new AzureKeyCredential(apiKey)
+    );
+
+    const searchResults = await searchClient.search(searchText, {
+      top: 3,
+
+      // filter: filter,
+      vectorSearchOptions: {
+        queries: [
+          {
+            vector: embeddings.data[0].embedding,
+            fields: vectors,
+            kind: "vector",
+            kNearestNeighborsCount: 10,
+          },
+        ],
+      },
+    });
+
+    const results: Array<any> = [];
+    for await (const result of searchResults.results) {
+      const item = {
+        score: result.score,
+        document: result.document,
+      };
+
+      // exclude the all the fields that are not in the fields array
+      const document = item.document as any;
+      const newDocument: any = {};
+
+      // iterate over the object entries in document
+      // and only include the fields that are in the fields array
+
+      for (const key in document) {
+        const hasKey = vectors.includes(key);
+        if (!hasKey) {
+          newDocument[key] = document[key];
+        }
+      }
+
+      results.push({
+        score: result.score,
+        document: newDocument, // Use the newDocument object instead of the original document
+      });
+    }
+
+    return {
+      status: "OK",
+      response: results,
+    };
+  } catch (e) {
+    return {
+      status: "ERROR",
+      errors: [
+        {
+          message: `${e}`,
+        },
+      ],
+    };
+  }
+};
+
 export const IndexDocuments = async (
   fileName: string,
   docs: string[],
@@ -76,40 +210,45 @@ export const IndexDocuments = async (
         id: uniqueId(),
         chatThreadId,
         user: await userHashedId(),
-        content: doc,
-        metadata_spo_item_name: fileName,
-        metadata_spo_item_path: "", // Assuming path is not provided
-        metadata_spo_item_content_type: "", // Assuming content_type is not provided
-        metadata_spo_item_last_modified: new Date().toISOString(),
-        metadata_spo_item_size: Buffer.byteLength(doc, "utf-8"),
+        pageContent: doc,
+        metadata: fileName,
+        embedding: [],
       };
 
       documentsToIndex.push(docToAdd);
     }
 
     const instance = AzureAISearchInstance();
-    const uploadResponse = await instance.uploadDocuments(documentsToIndex);
+    const embeddingsResponse = await EmbedDocuments(documentsToIndex);
 
-    const response: Array<ServerActionResponse<boolean>> = [];
-    uploadResponse.results.forEach((r) => {
-      if (r.succeeded) {
-        response.push({
-          status: "OK",
-          response: r.succeeded,
-        });
-      } else {
-        response.push({
-          status: "ERROR",
-          errors: [
-            {
-              message: `${r.errorMessage}`,
-            },
-          ],
-        });
-      }
-    });
+    if (embeddingsResponse.status === "OK") {
+      const uploadResponse = await instance.uploadDocuments(
+        embeddingsResponse.response
+      );
 
-    return response;
+      const response: Array<ServerActionResponse<boolean>> = [];
+      uploadResponse.results.forEach((r) => {
+        if (r.succeeded) {
+          response.push({
+            status: "OK",
+            response: r.succeeded,
+          });
+        } else {
+          response.push({
+            status: "ERROR",
+            errors: [
+              {
+                message: `${r.errorMessage}`,
+              },
+            ],
+          });
+        }
+      });
+
+      return response;
+    }
+
+    return [embeddingsResponse];
   } catch (e) {
     return [
       {
@@ -176,6 +315,39 @@ export const DeleteDocuments = async (
   }
 };
 
+export const EmbedDocuments = async (
+  documents: Array<AzureSearchDocumentIndex>
+): Promise<ServerActionResponse<Array<AzureSearchDocumentIndex>>> => {
+  try {
+    const openai = OpenAIEmbeddingInstance();
+
+    const contentsToEmbed = documents.map((d) => d.pageContent);
+
+    const embeddings = await openai.embeddings.create({
+      input: contentsToEmbed,
+      model: process.env.AZURE_OPENAI_API_EMBEDDINGS_DEPLOYMENT_NAME,
+    });
+
+    embeddings.data.forEach((embedding, index) => {
+      documents[index].embedding = embedding.embedding;
+    });
+
+    return {
+      status: "OK",
+      response: documents,
+    };
+  } catch (e) {
+    return {
+      status: "ERROR",
+      errors: [
+        {
+          message: `${e}`,
+        },
+      ],
+    };
+  }
+};
+
 export const EnsureIndexIsCreated = async (): Promise<
   ServerActionResponse<SearchIndex>
 > => {
@@ -198,6 +370,27 @@ const CreateSearchIndex = async (): Promise<
     const client = AzureAISearchIndexClientInstance();
     const result = await client.createIndex({
       name: process.env.AZURE_SEARCH_INDEX_NAME,
+      vectorSearch: {
+        algorithms: [
+          {
+            name: "hnsw-vector",
+            kind: "hnsw",
+            parameters: {
+              m: 4,
+              efConstruction: 200,
+              efSearch: 200,
+              metric: "cosine",
+            },
+          },
+        ],
+        profiles: [
+          {
+            name: "hnsw-vector",
+            algorithmConfigurationName: "hnsw-vector",
+          },
+        ],
+      },
+
       fields: [
         {
           name: "id",
@@ -218,33 +411,23 @@ const CreateSearchIndex = async (): Promise<
           filterable: true,
         },
         {
-          name: "content",
+          name: "pageContent",
           searchable: true,
           type: "Edm.String",
         },
         {
-          name: "metadata_spo_item_name",
+          name: "metadata",
           type: "Edm.String",
+        },
+        {
+          name: "embedding",
+          type: "Collection(Edm.Single)",
           searchable: true,
-        },
-        {
-          name: "metadata_spo_item_path",
-          type: "Edm.String",
-        },
-        {
-          name: "metadata_spo_item_content_type",
-          type: "Edm.String",
-          filterable: true,
-          facetable: true,
-        },
-        {
-          name: "metadata_spo_item_last_modified",
-          type: "Edm.DateTimeOffset",
-          sortable: true,
-        },
-        {
-          name: "metadata_spo_item_size",
-          type: "Edm.Int64",
+          filterable: false,
+          sortable: false,
+          facetable: false,
+          vectorSearchDimensions: 1536,
+          vectorSearchProfileName: "hnsw-vector",
         },
       ],
     });
