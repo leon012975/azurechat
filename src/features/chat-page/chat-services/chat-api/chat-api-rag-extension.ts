@@ -1,4 +1,4 @@
-import { ExtensionSimilaritySearch } from "../azure-ai-search/azure-ai-search";
+import { SimpleSearch } from "../azure-ai-search/azure-ai-search";
 import { CreateCitations, FormatCitations } from "../citation-service";
 
 export const SearchAzureAISimilarDocuments = async (req: Request) => {
@@ -6,19 +6,12 @@ export const SearchAzureAISimilarDocuments = async (req: Request) => {
     const body = await req.json();
     const search = body.search as string;
 
-    const vectors = req.headers.get("vectors") as string;
     const apiKey = req.headers.get("apiKey") as string;
     const searchName = req.headers.get("searchName") as string;
     const indexName = req.headers.get("indexName") as string;
     const userId = req.headers.get("authorization") as string;
 
-    const result = await ExtensionSimilaritySearch({
-      apiKey,
-      searchName,
-      indexName,
-      vectors: vectors.split(","),
-      searchText: search,
-    });
+    const result = await SimpleSearch(search);
 
     if (result.status !== "OK") {
       console.error("🔴 Retrieving documents", result.errors);
