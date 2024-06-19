@@ -180,9 +180,6 @@ export const EnsureIndexIsCreated = async (): Promise<
     return {
       status: "OK",
       response: result,
-  return {
-      status: "OK",
-      response: result,
     };
   } catch (e) {
     return await CreateSearchIndex();
@@ -268,4 +265,4 @@ const CreateSearchIndex = async (): Promise<
       ],
     };
   }
-};    
+};
